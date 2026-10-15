@@ -18,3 +18,9 @@
 
 ## Локальная проверка
 `python -m venv .venv && .venv/bin/pip install -r requirements.txt && .venv/bin/python test_local.py`
+
+## Режим ПК (без API-ключа)
+Бот запускается на Windows-ПК и отвечает через Claude Code (`claude -p`) по подписке.
+1. Установи Python 3.12 и Claude Code, один раз войди: `claude` → /login.
+2. Скопируй `.env.pc.example` в `.env`, впиши токен бота; `ALLOWED_TELEGRAM_USER_ID` впишешь после `/myid`.
+3. Запусти `start.bat`. ПК должен быть включён. Два экземпляра с одним токеном (ПК и Railway) одновременно работать не могут.

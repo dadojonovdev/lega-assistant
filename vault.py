@@ -38,7 +38,7 @@ def redact(text: str) -> str:
 class Vault:
     def __init__(self, path, repo: str | None = None, token: str | None = None,
                  author_name="AI Operations Manager", author_email="assistant@localhost",
-                 tz_hours: int = 5):
+                 tz_hours: int = 5, use_git: bool = True):
         self.path = Path(path)
         self.repo = repo
         self.token = token
@@ -47,6 +47,7 @@ class Vault:
         self.tz = timezone(timedelta(hours=tz_hours))
         self.lock = threading.Lock()
         self.has_remote = False
+        self.use_git = use_git
 
     # ---- git ----
     def _git(self, *args, check=True):
@@ -66,6 +67,10 @@ class Vault:
 
     def setup(self):
         with self.lock:
+            if not self.use_git:
+                if not self.path.is_dir():
+                    raise RuntimeError(f"Папка vault не найдена: {self.path}")
+                return
             url = self._remote_url()
             if url and not (self.path / ".git").exists():
                 self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -178,6 +183,8 @@ class Vault:
             )
             target.write_text(content, encoding="utf-8")
             rel = str(target.relative_to(self.path))
+            if not self.use_git:
+                return rel
             self._git("add", rel)
             self._git("commit", "-m", f"note: {title[:60]}")
             pushed = self._push_unlocked()

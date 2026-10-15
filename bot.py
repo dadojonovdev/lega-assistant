@@ -5,20 +5,30 @@ import os
 from collections import defaultdict, deque
 from datetime import date
 
-import anthropic
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from agent import run_agent
+from cli_agent import run_cli
 from vault import Vault, redact
+
+def _load_env(path=".env"):
+    if os.path.exists(path):
+        for line in open(path, encoding="utf-8"):
+            line = line.split("#", 1)[0].strip()
+            if "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip('"'))
+
+
+_load_env()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("assistant")
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-MODEL = os.environ.get("MODEL", "claude-sonnet-5-5")
+API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")  # пусто = режим Claude Code на ПК (подписка)
+MODEL = os.environ.get("MODEL") or None
 ALLOWED = os.environ.get("ALLOWED_TELEGRAM_USER_ID", "").strip()
 DAILY_CAP = int(os.environ.get("DAILY_MESSAGE_CAP", "200"))
 VAULT_DIR = os.environ.get("VAULT_DIR", "/data/vault")
@@ -30,7 +40,6 @@ history = defaultdict(lambda: deque(maxlen=12))
 usage = {"day": date.today(), "n": 0}
 dp = Dispatcher()
 vault: Vault
-client: anthropic.AsyncAnthropic
 
 
 def authorized(m: Message) -> bool:
@@ -107,7 +116,11 @@ async def on_text(m: Message):
     try:
         await asyncio.to_thread(vault.pull)
         h = history[m.chat.id]
-        answer = await run_agent(client, MODEL, vault, list(h), m.text[:4000])
+        if API_KEY:
+            from agent import run_agent
+            answer = await run_agent(client, MODEL or "claude-sonnet-5-5", vault, list(h), m.text[:4000])
+        else:
+            answer = await run_cli(str(vault.path), list(h), m.text[:4000], MODEL)
         h.append({"role": "user", "content": m.text[:4000]})
         h.append({"role": "assistant", "content": answer})
         await reply_long(m, answer)
@@ -118,13 +131,16 @@ async def on_text(m: Message):
 
 async def main():
     global vault, client
-    missing = [k for k, v in {"TELEGRAM_BOT_TOKEN": BOT_TOKEN, "ANTHROPIC_API_KEY": API_KEY}.items() if not v]
+    missing = [k for k, v in {"TELEGRAM_BOT_TOKEN": BOT_TOKEN}.items() if not v]
     if missing:
         raise SystemExit(f"Не заданы переменные: {', '.join(missing)}")
-    vault = Vault(VAULT_DIR, repo=VAULT_REPO, token=GITHUB_TOKEN, tz_hours=TZ_HOURS)
+    use_git = os.environ.get("VAULT_GIT", "1") != "0"
+    vault = Vault(VAULT_DIR, repo=VAULT_REPO, token=GITHUB_TOKEN, tz_hours=TZ_HOURS, use_git=use_git)
     await asyncio.to_thread(vault.setup)
     log.info("vault готов: %s, удалённый репозиторий: %s", VAULT_DIR, vault.has_remote)
-    client = anthropic.AsyncAnthropic(api_key=API_KEY)
+    if API_KEY:
+        import anthropic
+        client = anthropic.AsyncAnthropic(api_key=API_KEY)
     bot = Bot(BOT_TOKEN)
     await bot.delete_webhook(drop_pending_updates=True)
     log.info("бот запущен, ограничение по пользователю: %s", "да" if ALLOWED else "НЕТ (задай ALLOWED_TELEGRAM_USER_ID)")
