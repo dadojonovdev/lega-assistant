@@ -3,6 +3,7 @@ Claude Code запускается в папке vault и сам читает з
 import asyncio
 import os
 import shutil
+import tempfile
 
 SYSTEM = """Ты — AI Operations Manager Далерчона: продакт-менеджера IT-компании, которая делает ПО для производителей окон и дверей. Общаешься с ним в Telegram.
 Рабочая папка — его vault (Obsidian). Сначала читай wiki/INDEX.md, затем нужные заметки (Grep/Glob/Read).
@@ -13,6 +14,10 @@ SYSTEM = """Ты — AI Operations Manager Далерчона: продакт-м
 - Нет доступа к Jira, Confluence, календарю и личным чатам; во внешних системах ничего не создавай.
 - Не раскрывай токены, ключи и персональные данные."""
 
+_SYS = os.path.join(tempfile.gettempdir(), "ops_bot_system_prompt.txt")
+with open(_SYS, "w", encoding="utf-8") as _f:
+    _f.write(SYSTEM)
+
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN") or shutil.which("claude") or "claude"
 TIMEOUT = int(os.environ.get("CLAUDE_TIMEOUT", "240"))
 
@@ -22,19 +27,19 @@ async def run_cli(vault_dir: str, history: list, text: str, model: str | None = 
         f"{'Пользователь' if h['role'] == 'user' else 'Ассистент'}: {h['content']}" for h in history
     )
     prompt = (f"Предыдущий диалог:\n{ctx}\n\n" if ctx else "") + f"Новое сообщение пользователя:\n{text}"
-    cmd = [CLAUDE_BIN, "-p", prompt, "--append-system-prompt", SYSTEM,
-           "--allowedTools", "Read", "Glob", "Grep",
-           "--disallowedTools", "Bash", "Write", "Edit", "WebFetch", "WebSearch"]
+    cmd = [CLAUDE_BIN, "-p", "--append-system-prompt-file", _SYS,
+           "--allowedTools", "Read,Glob,Grep",
+           "--disallowedTools", "Bash,Write,Edit,WebFetch,WebSearch"]
     if model:
         cmd += ["--model", model]
     proc = await asyncio.create_subprocess_exec(
         *cmd, cwd=vault_dir, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        stdin=asyncio.subprocess.DEVNULL)
+        stdin=asyncio.subprocess.PIPE)
     try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=TIMEOUT)
+        out, err = await asyncio.wait_for(proc.communicate(prompt.encode("utf-8")), timeout=TIMEOUT)
     except asyncio.TimeoutError:
         proc.kill()
         return "Claude Code не ответил вовремя. Попробуй короче или позже."
     if proc.returncode != 0:
-        raise RuntimeError(f"claude exit {proc.returncode}: {err.decode('utf-8', 'ignore')[:300]}")
+        raise RuntimeError(f"claude exit {proc.returncode}: {(err or out).decode('utf-8', 'ignore')[:400]}")
     return out.decode("utf-8", "ignore").strip()

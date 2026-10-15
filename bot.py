@@ -126,7 +126,7 @@ async def on_text(m: Message):
         await reply_long(m, answer)
     except Exception as e:
         log.error("agent error: %s", redact(str(e)))
-        await m.answer("Ошибка при обработке. Подробности в логах сервиса.")
+        await m.answer(f"Ошибка при обработке: {redact(str(e))[:350]}")
 
 
 async def main():
